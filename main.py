@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import firebase_admin
 from firebase_admin import credentials, db
@@ -13,19 +14,25 @@ from telethon.errors.rpcerrorlist import PeerFloodError, UserPrivacyRestrictedEr
 
 # ================= SOZLAMALAR (Railway Variables'dan olinadi) =================
 API_ID = int(os.getenv("API_ID", "1234567"))          
-API_HASH = os.getenv("API_HASH", "SIZNING_API_HASH")   
-BOT_TOKEN = os.getenv("BOT_TOKEN", "SIZNING_BOT_TOKEN")       
-FIREBASE_URL = os.getenv("FIREBASE_URL", "https://sizning-loyihangiz-default-rtdb.firebaseio.com/") 
+API_HASH = os.getenv("API_HASH", "API_HASH_KODINGIZ")   
+BOT_TOKEN = os.getenv("BOT_TOKEN", "BOT_TOKENINGIZ")       
+FIREBASE_URL = os.getenv("FIREBASE_URL", "https://telegram-inviting-default-rtdb.firebaseio.com/") 
 MY_GROUP = os.getenv("MY_GROUP", "guruhingiz_nomi")   
+FIREBASE_KEY_JSON = os.getenv("FIREBASE_KEY_JSON", "{}")
 # ============================================================================
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-# Firebase ulanishi (firebase_key.json fayli orqali)
-cred = credentials.Certificate("firebase_key.json")
-firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
+# ================= FIREBASE ULANISHI =================
+try:
+    firebase_dict = json.loads(FIREBASE_KEY_JSON)
+    cred = credentials.Certificate(firebase_dict)
+    firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
+    print("✅ Firebase muvaffaqiyatli ulandi!")
+except Exception as e:
+    print(f"❌ Firebase ulanishida xatolik: {e}")
 
 class BotStates(StatesGroup):
     waiting_for_group = State()
@@ -60,7 +67,6 @@ async def parse_process(message: types.Message, state: FSMContext):
         await msg.edit_text("❌ Tizimda hali faol akkaunt yo'q. Avval 'Akkaunt Qo'shish' orqali raqam kiriting.")
         return
 
-    # Parsing uchun birinchi faol akkauntni olamiz
     active_phones = [p for p, data in accs.items() if data.get('status') == 'faol']
     if not active_phones:
         await msg.edit_text("❌ Tizimda faol akkaunt qolmagan!")
@@ -79,12 +85,11 @@ async def parse_process(message: types.Message, state: FSMContext):
         count = 0
         for u in participants:
             if u.username and not u.bot:
-                # Agar bazada bu odam yo'q bo'lsa, uni qo'shamiz
                 if not users_ref.child(u.username).get():
                     users_ref.child(u.username).set({'status': 'yangi'})
                     count += 1
                 
-        await msg.edit_text(f"✅ Parsing muvaffaqiyatli yakunlandi!\n🔥 {count} ta yangi takrorlanmas odam Firebase'ga yuklandi.")
+        await msg.edit_text(f"✅ Parsing muvaffaqiyatli yakunlandi!\n🔥 {count} ta yangi odam Firebase'ga yuklandi.")
         await client.disconnect()
     except Exception as e:
         await msg.edit_text(f"❌ Guruhni o'qishda xatolik yuz berdi: {e}")
@@ -103,7 +108,6 @@ async def add_acc_phone(message: types.Message, state: FSMContext):
     
     try:
         sent_code = await client.send_code_request("+" + phone)
-        # Ma'lumotlarni keyingi bosqich uchun saqlaymiz
         await state.update_data(phone=phone, hash=sent_code.phone_code_hash, session=client.session.save())
         await message.answer("📩 Telegramdan kelgan 5 xonali kodni kiriting:")
         await BotStates.waiting_for_code.set()
@@ -121,14 +125,13 @@ async def add_acc_code(message: types.Message, state: FSMContext):
     
     try:
         await client.sign_in("+" + data['phone'], code, phone_code_hash=data['hash'])
-        session_str = client.session.save() # Endi tayyor va ruxsat olingan sessiya
+        session_str = client.session.save() 
         
-        # Firebasega saqlash
         db.reference('accounts').child(data['phone']).set({
             'session': session_str,
             'status': 'faol'
         })
-        await message.answer(f"🎉 +{data['phone']} akkaunti Firebase bazasiga muvaffaqiyatli saqlandi va ishlashga tayyor!")
+        await message.answer(f"🎉 +{data['phone']} akkaunti tizimga qo'shildi!")
     except Exception as e:
         await message.answer(f"❌ Kod xato yoki 2-bosqichli parol yoniq: {e}")
     finally:
@@ -138,7 +141,7 @@ async def add_acc_code(message: types.Message, state: FSMContext):
 # ================= 3. INVAYTING QISMI =================
 @dp.message_handler(lambda m: m.text == "🚀 Invaytingni Boshlash")
 async def start_inviting(message: types.Message):
-    msg = await message.answer("🚀 Avtomatik invayting tsikli boshlandi. Jarayon hisobotlari shu yerga keladi...")
+    msg = await message.answer("🚀 Avtomatik invayting boshlandi. Kuting...")
     
     accs = db.reference('accounts').get()
     users_data = db.reference('users').get()
@@ -147,17 +150,16 @@ async def start_inviting(message: types.Message):
         await msg.edit_text("❌ Akkauntlar yoki foydalanuvchilar bazasi bo'sh!")
         return
 
-    # Faqat yangi odamlarni ro'yxat qilib olamiz
     target_users = [uname for uname, udata in users_data.items() if udata.get('status') == 'yangi']
     
     if not target_users:
-        await msg.edit_text("❌ Bazada qo'shilmagan (yangi) odamlar qolmadi. Parsing qiling!")
+        await msg.edit_text("❌ Bazada yangi odamlar qolmadi. Parsing qiling!")
         return
 
     user_idx = 0
     for phone, acc_info in accs.items():
         if acc_info.get('status') != 'faol': 
-            continue # Bloklangan raqamlarni tashlab o'tamiz
+            continue 
             
         if user_idx >= len(target_users): 
             break
@@ -167,7 +169,7 @@ async def start_inviting(message: types.Message):
         await client.connect()
         
         added = 0
-        max_limit = 8 # Har bir akkaunt uchun XAVFSIZ KUNLIK LIMIT
+        max_limit = 8 
         
         while added < max_limit and user_idx < len(target_users):
             user = target_users[user_idx]
@@ -177,11 +179,11 @@ async def start_inviting(message: types.Message):
                 db.reference('users').child(user).update({'status': 'qo_shildi'})
                 added += 1
                 await message.answer(f"   ✅ @{user} muvaffaqiyatli qo'shildi! ({added}/{max_limit})")
-                await asyncio.sleep(25) # 25 soniyalik xavfsizlik pauzasi
+                await asyncio.sleep(25) 
                 
             except PeerFloodError:
                 db.reference('accounts').child(phone).update({'status': 'flood_block'})
-                await message.answer(f"   ⚠️ +{phone} Telegram tomonidan vaqtincha cheklandi (Flood Block). Keyingi raqamga o'tiladi.")
+                await message.answer(f"   ⚠️ +{phone} Flood Block oldi. Keyingi raqamga o'tiladi.")
                 break
             except FloodWaitError as e:
                 await message.answer(f"   ⏳ Telegram {e.seconds} soniya kutishni so'radi. Raqam almashadi.")
@@ -199,7 +201,7 @@ async def start_inviting(message: types.Message):
             await message.answer("🔄 Akkauntlar almashmoqda, 45 soniya tanaffus...")
             await asyncio.sleep(45)
 
-    await message.answer("🎉 Barcha faol akkauntlar o'z limitini bajardi! Invayting tsikli to'liq yakunlandi.")
+    await message.answer("🎉 Invayting tsikli to'liq yakunlandi.")
 
 # ================= 4. STATISTIKA QISMI =================
 @dp.message_handler(lambda m: m.text == "📊 Statistika")
@@ -212,19 +214,14 @@ async def show_stats(message: types.Message):
     
     yangi = sum(1 for u in users_data.values() if u.get('status') == 'yangi')
     qoshingan = sum(1 for u in users_data.values() if u.get('status') == 'qo_shildi')
-    yopiq = sum(1 for u in users_data.values() if u.get('status') == 'yopiq_profil')
     
     text = f"📊 **Tizim statistikasi:**\n\n"
-    text += f"📱 **Akkauntlar:**\n"
-    text += f"   🟢 Faol: {faol_acc} ta\n"
-    text += f"   🔴 Flood-blokda: {blok_acc} ta\n\n"
-    text += f"👥 **Foydalanuvchilar (Baza):**\n"
-    text += f"   🆕 Navbatda turganlar: {yangi} ta\n"
-    text += f"   ✅ Muvaffaqiyatli qo'shilganlar: {qoshingan} ta\n"
-    text += f"   🔒 Yopiq profillar: {yopiq} ta\n"
+    text += f"📱 Faol akkauntlar: {faol_acc} ta\n"
+    text += f"🔴 Bloklanganlar: {blok_acc} ta\n\n"
+    text += f"🆕 Navbatdagi odamlar: {yangi} ta\n"
+    text += f"✅ Qo'shib bo'linganlar: {qoshingan} ta\n"
     
     await message.answer(text, parse_mode="Markdown")
 
 if __name__ == '__main__':
-    # Telegram botni doimiy eshitish rejimida ishga tushirish
     executor.start_polling(dp, skip_updates=True)
