@@ -1,0 +1,3 @@
+telethon
+aiogram==2.25.1
+firebase-admin
